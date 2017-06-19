@@ -1,0 +1,50 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5), ifup(8)
+#
+# Please see /usr/share/doc/python-ifupdown2/examples/ for examples
+#
+#
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+    address 10.254.0.18/32
+
+# The primary network interface
+auto eth0
+iface eth0 inet dhcp
+    vrf mgmt
+
+auto swp49
+iface swp49
+
+auto swp50
+iface swp50
+
+auto swp51
+iface swp51
+
+auto swp52
+iface swp52
+
+auto bridge
+iface bridge
+    bridge-ports peerlink
+    bridge-vlan-aware yes
+
+auto mgmt
+iface mgmt
+    address 127.0.0.1/8
+    vrf-table auto
+
+auto peerlink
+iface peerlink
+    bond-slaves swp49 swp50
+
+auto peerlink.4094
+iface peerlink.4094
+    address 169.254.1.2/30
+    clagd-backup-ip 192.168.0.41 vrf mgmt
+    clagd-peer-ip 169.254.1.1
+    clagd-priority 2000
+    clagd-sys-mac 44:38:39:ff:00:17

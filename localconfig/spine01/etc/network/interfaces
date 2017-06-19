@@ -1,0 +1,39 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5), ifup(8)
+#
+# Please see /usr/share/doc/python-ifupdown2/examples/ for examples
+#
+#
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+    address 10.254.0.30/32
+
+# The primary network interface
+auto eth0
+iface eth0 inet dhcp
+    vrf mgmt
+
+auto swp1
+iface swp1
+
+auto swp2
+iface swp2
+
+auto swp3
+iface swp3
+
+auto swp4
+iface swp4
+
+auto swp29
+iface swp29
+
+auto swp30
+iface swp30
+
+auto mgmt
+iface mgmt
+    address 127.0.0.1/8
+    vrf-table auto
