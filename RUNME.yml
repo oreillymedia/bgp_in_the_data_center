@@ -69,7 +69,7 @@
 
   - name: Get my node ID
     set_fact:
-      my_node_id: "{{ (64 + (inventory_hostname.split('t')[1]|int))|int }}"
+      my_node_id: "{{ (16 + (inventory_hostname.split('t')[1]|int))|int }}"
     tags:
       - compute
       - always

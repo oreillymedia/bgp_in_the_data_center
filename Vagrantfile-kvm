@@ -299,7 +299,7 @@ SCRIPT
 
 Vagrant.configure("2") do |config|
   wbid = 1
-  offset = 0
+  offset = 1100
 
   config.vm.provider :libvirt do |domain|
     # increase nic adapter count to be greater than 8 for all VMs.
@@ -311,42 +311,39 @@ Vagrant.configure("2") do |config|
 
 
   ##### DEFINE VM for oob-mgmt-server #####
-  config.vm.define "oob-mgmt-server" do |device|
+  config.vm.define "oob-mgmt-server", primary: true do |device|
     device.vm.hostname = "oob-mgmt-server"
-    device.vm.box = "yk0/ubuntu-xenial"
+    device.vm.box = "CumulusCommunity/cumulus-vx"
     
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
     device.vm.synced_folder '.', '/vagrant', :disabled => true
     device.vm.provider :libvirt do |v|
-      v.memory = 1024
+      v.memory = 1*1024
     end
-    device.vm.synced_folder ".", "/vagrant", disabled: true
+    device.vm.network "forwarded_port", guest: 9000, host: 9002, gateway_ports: true, host_ip: '*', adapter: 'eno1' # portainer
+ 
+    # NETWORK INTERFACES
+    # link for eth1 --> oob-mgmt-switch:swp1
+    device.vm.network "private_network",
+          :mac => "44383900005f",
+          :libvirt__tunnel_type => 'udp',
+          :libvirt__tunnel_local_ip => '127.0.0.1',
+          :libvirt__tunnel_local_port => "#{ 8054 + offset }",
+          :libvirt__tunnel_ip => '127.0.0.1',
+          :libvirt__tunnel_port => "#{ 9054 + offset }",
+          :libvirt__iface_name => 'eth1',
+          auto_config: false
 
-      # NETWORK INTERFACES
-      # link for eth1 --> oob-mgmt-switch:swp1
-      device.vm.network "private_network",
-            :mac => "44383900005f",
-            :libvirt__tunnel_type => 'udp',
-            :libvirt__tunnel_local_ip => '127.0.0.1',
-            :libvirt__tunnel_local_port => "#{ 8054 + offset }",
-            :libvirt__tunnel_ip => '127.0.0.1',
-            :libvirt__tunnel_port => "#{ 9054 + offset }",
-            :libvirt__iface_name => 'eth1',
-            auto_config: false
+    # Fixes "stdin: is not a tty" and "mesg: ttyname failed : Inappropriate ioctl for device"  messages --> https://github.com/mitchellh/vagrant/issues/1673
+    device.vm.provision :shell , inline: "(grep -q 'mesg n' /root/.profile 2>/dev/null && sed -i '/mesg n/d' /root/.profile  2>/dev/null && echo 'Ignore the previous error, fixing this now...') || true;"
 
+    # Shorten Boot Process - Applies to Ubuntu Only - remove \"Wait for Network\"
+    #device.vm.provision :shell , inline: "sed -i 's/sleep [0-9]*/sleep 1/' /etc/init/failsafe.conf || true"
 
-
-      # Fixes "stdin: is not a tty" and "mesg: ttyname failed : Inappropriate ioctl for device"  messages --> https://github.com/mitchellh/vagrant/issues/1673
-      device.vm.provision :shell , inline: "(grep -q 'mesg n' /root/.profile 2>/dev/null && sed -i '/mesg n/d' /root/.profile  2>/dev/null && echo 'Ignore the previous error, fixing this now...') || true;"
-
-      # Shorten Boot Process - Applies to Ubuntu Only - remove \"Wait for Network\"
-      device.vm.provision :shell , inline: "sed -i 's/sleep [0-9]*/sleep 1/' /etc/init/failsafe.conf || true"
-
-      # Run Any Extra Config
-      device.vm.provision :shell , path: "./helper_scripts/config_oob_server.sh"
-
+    # Run Any Extra Config
+    device.vm.provision :shell , path: "./helper_scripts/config_oob_server.sh"
 
     extravars = {wbench_hosts: {
         exit02: {ip: "192.168.0.42", mac: "a0:00:00:00:00:42"},
@@ -363,26 +360,9 @@ Vagrant.configure("2") do |config|
         server02: {ip: "192.168.0.32", mac: "a0:00:00:00:00:32"},
         server04: {ip: "192.168.0.34", mac: "a0:00:00:00:00:34"},
         }}
-    device.vm.provision :shell , inline: "sudo apt-get update"
-    device.vm.provision :shell , inline: "sudo apt-get install software-properties-common vim lldpd git -y"
-    device.vm.provision :shell , inline: "sudo apt-add-repository ppa:ansible/ansible -y"
-    device.vm.provision :shell , inline: "sudo apt-get update"
-    device.vm.provision :shell , inline: "sudo apt-get install ansible -qy"
-    device.vm.provision :shell , inline: "git clone https://github.com/cumulusnetworks/cldemo-provision "
-    device.vm.provision :shell , inline: "ansible-playbook cldemo-provision/site.yml --extra-vars '#{extravars.to_json}'  --connection=local -i localhost,"
-
-
-      # Apply the interface re-map
-      device.vm.provision "file", source: "./helper_scripts/apply_udev.py", destination: "/home/vagrant/apply_udev.py"
-      device.vm.provision :shell , inline: "chmod 755 /home/vagrant/apply_udev.py"
-      device.vm.provision :shell , inline: "/home/vagrant/apply_udev.py -a 44:38:39:00:00:5f eth1"
-
-
-      device.vm.provision :shell , inline: "/home/vagrant/apply_udev.py -vm -nv"
-      device.vm.provision :shell , inline: "/home/vagrant/apply_udev.py -s"
-      device.vm.provision :shell , :inline => $script
-
-
+    device.vm.provision :shell , path: "./helper_scripts/oob-mgmt-server-provision.sh"
+    device.vm.provision :shell , inline: "ansible-playbook cldemo-provision-ts/site.yml --extra-vars '#{extravars.to_json}'  --connection=local -i localhost,"
+    device.vm.provision :shell , path: "./helper_scripts/bgpdc-clone.sh"
 
   end
 
@@ -390,7 +370,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "oob-mgmt-switch" do |device|
     device.vm.hostname = "oob-mgmt-switch"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -596,7 +576,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "exit02" do |device|
     device.vm.hostname = "exit02"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -758,7 +738,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "exit01" do |device|
     device.vm.hostname = "exit01"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -920,7 +900,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "spine02" do |device|
     device.vm.hostname = "spine02"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -1060,7 +1040,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "spine01" do |device|
     device.vm.hostname = "spine01"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -1200,7 +1180,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "leaf04" do |device|
     device.vm.hostname = "leaf04"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -1362,7 +1342,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "leaf02" do |device|
     device.vm.hostname = "leaf02"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -1524,7 +1504,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "leaf03" do |device|
     device.vm.hostname = "leaf03"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -1686,7 +1666,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "leaf01" do |device|
     device.vm.hostname = "leaf01"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
@@ -2228,7 +2208,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "internet" do |device|
     device.vm.hostname = "internet"
     device.vm.box = "CumulusCommunity/cumulus-vx"
-    device.vm.box_version = "3.2.0"
+    device.vm.box_version = ">=3.3.0"
 
     # disabling sync folder support on all VMs
     #   see note here: https://github.com/pradels/vagrant-libvirt#synced-folders
