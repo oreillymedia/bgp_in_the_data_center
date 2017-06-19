@@ -19,6 +19,7 @@ leaf_to_spine_ports: "swp51 swp52"
 leaf_to_server_ports: "swp[1-2]"
 
 ################### Routing Protocol Used ###########################
+# Only BGP supported here
 protocol: 'bgp'
 
 ################### SVI and Host IP CONFIGURATION ###################

@@ -27,9 +27,8 @@ Quickstart
 Details
 ------------------------
 
-This demo will configure a layer 3 BGP network. The demo is downloaded onto the `oob-mgmt-server` under the `cumulus` user. It assumes the network is up and running (via `vagrant up`) but it **has not** yet been configured. The playbook `RUNME.yml` will configure BGP (or OSPF) on all spine and leafs as well as configure the hosts.
+This demo will configure a layer 3 BGP network. The demo is downloaded onto the `oob-mgmt-server` under the `cumulus` user. It assumes the network is up and running (via `vagrant up`) but it **has not** yet been configured. The playbook `RUNME.yml` will configure BGP on all spine and leafs as well as configure the hosts.
 
-You can change the protocol in the properties.yml file to "ospf" to configure the CLOS with unnumbered OSPF rather than BGP. Run the reset playbook before switching protocols to ensure a clean slate to start the configuration on.
 
 
 Resetting The Topology
