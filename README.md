@@ -13,7 +13,7 @@ See an error? Report it [here](http://oreilly.com/catalog/errata.csp?isbn=063692
 Pre-requisites
 ----------------
 
-To run the software in this repository, you'll need both ![Vagrant](https://www.vagrantup.com/) and ![Virtualbox](https://www.virtualbox.org/).
+To run the software in this repository, you'll need both [Vagrant](https://www.vagrantup.com/) and [Virtualbox](https://www.virtualbox.org/).
 If you're merely interested in looking at the configs, then look under the localconfig directory.
 
 While the book talked about FRRouting as the open source routing suite, because the demo here is based off of Cumulus Linux' 3.3.x release, Quagga is still used. However, the next release of Cumulus Linux will have FRRouting as the default routing suite. That said, the configuration is the same in both cases.
