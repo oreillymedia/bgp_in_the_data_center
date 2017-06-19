@@ -1,0 +1,45 @@
+---
+- hosts: all
+  vars_files:
+    - properties.yml
+  any_errors_fatal: true
+  tasks:
+    - name: Clean out /etc/network/interfaces file
+      shell: echo "" > /etc/network/interfaces
+
+    - name: Add basic /etc/network/interfaces file
+      blockinfile:
+        dest: /etc/network/interfaces
+        block: |
+          # The loopback network interface
+          auto lo
+          iface lo inet loopback
+
+          # The primary network interface
+          auto eth0
+          iface eth0 inet dhcp
+
+- hosts: '!server*'
+  tasks:
+    - name: Stop quagga
+      service: name=quagga state=stopped
+
+    - name: Reset quagga config
+      file: name=/etc/quagga/Quagga.conf state=absent
+
+    - name: Wipe out quagga log
+      file: name=/var/log/quagga/quagga.log state=absent
+
+    - name: Wipe out all quagga enabled daemons
+      replace: dest=/etc/quagga/daemons regexp='(ospfd|bgpd|zebra)=yes' replace='\1=no'
+
+    - name: Reload interfaces
+      command: ifreload -a
+
+- hosts: 'server*'
+  tasks:
+    - name: Reload interfaces
+      command: /usr/bin/systemd-run --on-active=10 /bin/systemctl reboot
+      async: 0
+      poll: 0
+

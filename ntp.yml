@@ -1,0 +1,61 @@
+---
+#Setup the switch time zone (Note this will always report changed if re-run after the dpkg-reconfigure)
+#For a list of time zones check: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+    - name: Set time zone /etc/timezone
+      copy: content="America/Los_Angeles" dest=/etc/timezone
+      become: true
+      tags:
+         - time_setup
+         - initial_setup
+
+    #Update switch tzdata for the new time zone using dpkg-reconfigure
+    - name: Update tzdata with new time zone information
+      command: dpkg-reconfigure -f noninteractive tzdata
+      become: true
+      tags:
+        - time_setup
+        - initial_setup
+
+    #Configure ntpd
+    - name: Setup NTP Base Config
+      blockinfile:
+        dest: /etc/ntp.conf
+        create: yes
+        marker: "#{mark} Base config. ANSIBLE MANAGED BLOCK"
+        block: |
+          driftfile /var/lib/ntp/ntp.drift
+
+          restrict default nomodify notrap nopeer noquery
+          restrict 127.0.0.1
+          restrict ::1
+
+          interface listen eth0
+      become: true
+      tags:
+        - time_setup
+        - initial_setup
+     
+    #Configure specific time servers by inserting your servers 
+    #after the sample one in the conf file
+    - name: Setup NTP servers
+      blockinfile:
+        dest: /etc/ntp.conf
+        marker: "#{mark} {{item}}. ANSIBLE MANAGED BLOCK"
+        block: |
+          server {{ item }}
+      become: true
+      with_items: "{{ ntp_servers }}"
+      tags:
+        - time_setup
+        - initial_setup
+     
+    #Restart the NTP service to apply server changes
+    - name: Restart NTP service
+      service: name=ntp state=restarted
+      become: true
+      tags:
+        - time_setup
+        - initial_setup
+
+    - name: Save a local copy for reference
+      fetch: src=/etc/ntp.conf dest=localconfig

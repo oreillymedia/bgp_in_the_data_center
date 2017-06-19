@@ -1,0 +1,63 @@
+# Keep the numSpines and spine2leaf_ports consistent
+# For example, if num_spines was 3, leaf_to_spine_ports would
+# be "swp[1-3]". 
+num_spines: 2
+num_leaves: 4
+hosts_per_leaf: 1
+
+# Keep the num_leaves and spine_to_leaf_ports consistent
+# For example, with 4 leaves, spine_to_leaf_ports could be
+# "swp[1-4]". The first server port is after the last ISL port
+# For dual-attach ports, the number of leaves have to be even
+spine_to_leaf_ports: "swp[1-4]"
+
+# Keep the hosts_per_leaf and leaf_to_server_ports consistent
+# For example, if you had 2 hosts per leaf, leaf_to_server_ports
+# would be "swp[3-4]". The first server port is after the last ISL
+# port
+leaf_to_spine_ports: "swp51 swp52"
+leaf_to_server_ports: "swp[1-2]"
+
+################### Routing Protocol Used ###########################
+protocol: 'bgp'
+
+################### SVI and Host IP CONFIGURATION ###################
+lo_ip_subnet: '10.254.0.0/24'
+# The host_ip_base assumes that the lower 3 bytes are free for
+# use with server IP address assignment. The second byte represents the rack
+# (or leaf) number, the third byte to represent the VLAN used with the server
+# and the lowest number in the dotted decimal format is the
+# host IP address, with the first IP address reserved for the leaf's
+# SVI. For example, the first leaf has the SVI address 10.1.20.1 and
+# hosts attached to it have the IP address from 10.1.20.2-10.1.20.254.
+# When used with dual-attached hosts, hosts in both racks get the second
+# byte from the odd node's rack number. When used with VxLAN, the second
+# byte is fixed to 253.
+server_ip_base: '10.'
+default_vlan: 20
+
+################### Dual-Attach Server CONFIGURATION ################
+# Update the clag-peer ports based on how many server ports are there
+dual_attach_hosts: true
+clag_peer_ports: "swp49 swp50"
+
+###################### NTP Servers #########################
+ntp_servers:
+  - '192.168.100.254'
+  - '192.168.100.253'
+
+###################### VxLAN CONFIGURATION #########################
+use_vxlan: false
+use_lnv:   false
+
+################### ADVANCED CONFIGURATION #######################
+# Can be ignored by most users.
+##################################################################
+# BGP specific configuration. Following draft-lapukhov ebgp model
+# here. Spines have a single ASN, each ToR has its own ASN
+bgp_spine_asn: 65000
+bgp_leaf_asn_base: 64512
+clag_base_sys_mac: "44:38:39:ff:00:"
+
+# Troubleshooting server configuration
+anycast_ip_redis: "192.168.0.254"

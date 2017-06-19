@@ -1,0 +1,124 @@
+# This is meant to be included in other main playbooks
+# It requires the definition of a variable "lo_ip" which is used to assign IP
+# address to every device's loopback. lo_ip_subnet is supposed to be
+# defined like this: '10.0.0.0/24'.
+---
+  - name: Get subnet size
+    set_fact:
+      subnet_size: "{{ lo_ip_subnet | ipaddr('net') | ipaddr('size') }}"
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Create subnet template
+    set_fact:
+      loopback_ip: "{{ ((lo_ip_subnet.split('/')[0]).split('.')[:3])|join('.') }}"
+    tags:
+      - compute
+      - assignip
+      - always      
+
+  # Split into two separate set facts thanks to how Ansible works
+  - name: Get first element of subnet(1)
+    set_fact:
+      subnet_first_host: "{{ lo_ip_subnet | ipaddr('net') | ipaddr('1') }}"
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Get first element of subnet(2)
+    set_fact:
+      first_host: "{{ ((subnet_first_host.split('/')[0]).split('.')[3]) }}"
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Create list of hosts without a loopback IP address
+    set_fact:
+      hosts_no_ip: |
+        [{% for h in groups['routers'] %}
+           {% if hostvars[h]['ansible_lsb'] is defined %}
+             {% if hostvars[h]['ansible_lo']['ipv4_secondaries'] is not defined %}
+               '{{h}}'
+               {% if not loop.last %}
+                 ,
+               {%endif%}
+             {%endif%}
+           {%endif%}
+         {%endfor%}]
+    tags:
+      - compute
+      - assignip
+
+  - name: Create list of assigned IP addresses
+    set_fact:
+      assigned_ip_list: |
+        [{% for h in groups['routers'] %}
+           {% if hostvars[h]['ansible_lsb'] is defined and hostvars[h]['ansible_lsb']['id'] == "Cumulus Linux" %}
+              {% if hostvars[h]['ansible_lo']['ipv4_secondaries'] is defined %}
+                '{{ hostvars[h]['ansible_lo']['ipv4_secondaries'][0]['address'] }}'
+                 {% if not loop.last %}
+                   ,
+                 {%endif%}
+              {%endif%}
+           {%endif%}
+        {%endfor%}]
+    tags:
+      - compute
+      - assignip
+      - always
+
+
+  - name: Create list of available IP addresses
+    set_fact:
+      avail_ip_list: |
+        [{% for i in range((first_host|int), (subnet_size|int) -2 + (first_host|int)) %}
+         {% if [loopback_ip, i]|join('.') not in assigned_ip_list %}
+            '{{loopback_ip}}.{{i}}'
+            {% if not loop.last %}
+              ,
+            {%endif%}
+         {%endif%}
+         {%endfor%}]
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Assign ip addresses to all unassigned nodes
+    set_fact:
+      host_ip_map: |
+        [{% set i=1 %}
+         {% for h in hosts_no_ip %}
+            ['{{h}}', '{{avail_ip_list[i]}}']
+            {% if not loop.last %}
+              ,
+            {%endif%}
+            {% set i=i+1 %}
+         {%endfor%}]
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Get my loopback IP
+    set_fact:
+      my_ip: "{{ item.1 }}"
+    with_items:
+      - "{{ host_ip_map }}"
+    when: "{{ item.0  == inventory_hostname }}"
+    tags:
+      - compute
+      - assignip
+      - always
+
+  - name: Get loopback IP if already configured
+    set_fact:
+      my_ip: "{{ ansible_lo.ipv4_secondaries[0].address }}"
+    when: ansible_lo.ipv4_secondaries[0] is defined
+
+  - debug: msg="{{ my_ip }}"
+

@@ -1,0 +1,16 @@
+# This is meant to be included in other main playbooks
+---
+ - include: islif-conf.yml
+
+ - include: brif-conf.yml
+   when: not use_vxlan
+
+ - name: Enable all interfaces
+   command: ifreload -a
+   become: yes
+   tags:
+     - ifconfig
+     - command
+
+ - name: Save a copy for local ref
+   fetch: src=/etc/network/interfaces dest=localconfig

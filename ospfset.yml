@@ -1,0 +1,108 @@
+# This is meant to be included in other main playbooks
+---
+  - name: Add logging and base config
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} base config ANSIBLE MANAGED BLOCK"
+      create: yes
+      block: |
+        !
+        service integrated-vtysh-config
+        log file /var/log/quagga/quagga.log
+        log timestamp precision 6
+        hostname quagga
+        username cumulus nopassword
+        password cn321
+        enable password cn321
+        !
+        ip forwarding
+        ipv6 forwarding
+        line vty
+        !
+    tags: routing
+
+  - name: Base OSPF config on spines
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} base ospf config ANSIBLE MANAGED BLOCK"
+      block: |
+        !
+        router ospf
+         ospf router-id {{ my_ip }}
+         passive-interface lo
+         
+    when: "{{ 'spine' in group_names }}"
+    tags: routing
+
+  - name: Base OSPF config on leaves
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} base ospf config ANSIBLE MANAGED BLOCK"
+      block: |
+        !
+        router ospf
+         ospf router-id {{ my_ip }}
+         passive-interface lo
+         passive-interface bridge.{{ default_vlan }}
+         
+    when: "{{ 'leaf' in group_names }}"
+    tags: routing
+
+  - name: Enable OSPF on all router ports
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} ospf {{ item }} config ANSIBLE MANAGED BLOCK"
+      block: |
+        !
+        interface {{ item }}
+         link-detect
+         ip ospf network point-to-point
+         ip ospf area 0.0.0.0
+         
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ ('spine' in group_names and item|match(spine_to_leaf_ports + '$' )) or
+              ('leaf' in group_names and item|match(leaf_to_spine_ports + '$' )) }}"
+    tags: routing
+      
+  - name: Announce loopback route
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} ospf lo config ANSIBLE MANAGED BLOCK"
+      block: |
+        !
+        interface lo
+         link-detect
+         ip ospf area 0.0.0.0
+         
+    tags: routing
+    
+  - name: Announce bridge route on leaves
+    blockinfile:
+      dest: /etc/quagga/Quagga.conf
+      marker: "!{mark} ospf bridge.{{ default_vlan }} config ANSIBLE MANAGED BLOCK"
+      block: |
+        !
+        interface bridge.{{ default_vlan }}
+         link-detect
+         ip ospf area 0.0.0.0
+         
+    when: "{{ 'leaf' in group_names }}"
+    tags: routing
+
+  - name: Enable OSPF and Zebra daemons
+    replace: dest=/etc/quagga/daemons regexp='(ospfd|zebra)=no' replace='\1=yes' backup=yes
+    sudo: yes
+    register: result
+    tags: routing
+
+  - name: Start the service to let the config take effect
+    service: name=quagga state=restarted
+    tags:
+      - routing
+      - command
+
+  - name: Save a local copy of daemons for reference
+    fetch: src=/etc/quagga/daemons dest=localconfig
+
+  - name: Save a local copy of config for reference
+    fetch: src=/etc/quagga/Quagga.conf dest=localconfig

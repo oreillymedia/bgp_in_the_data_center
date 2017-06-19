@@ -1,0 +1,203 @@
+# This is meant for inclusion in other files
+---
+  - name: Ensure whitespace separated spine2leaf ports are converted into regexps(1)
+    set_fact:
+         spine_to_leaf_ports: "{{ spine_to_leaf_ports.split(' ')|join('|') }}"
+    when: not spine_to_leaf_ports|search('\[') and not spine_to_leaf_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - name: Ensure whitespace separated spine2leaf ports are converted into regexps(2)
+    set_fact:
+       spine_to_leaf_ports: "{{ '(%s)'|format(spine_to_leaf_ports) }}"
+    when: not spine_to_leaf_ports|search('\[') and not spine_to_leaf_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - debug: msg="{{spine_to_leaf_ports}}"
+
+  - name: Ensure whitespace separated leaf2spine ports are converted into regexps(1)
+    set_fact:
+         leaf_to_spine_ports: "{{ leaf_to_spine_ports.split(' ')|join('|') }}"
+    when: not leaf_to_spine_ports|search('\[') and not leaf_to_spine_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - name: Ensure whitespace separated leaf2spine ports are converted into regexps(2)
+    set_fact:
+       leaf_to_spine_ports: "{{ '(%s)'|format(leaf_to_spine_ports) }}"
+    when: not leaf_to_spine_ports|search('\[') and not leaf_to_spine_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - debug: msg="{{leaf_to_spine_ports}}"
+
+  - name: Ensure whitespace separated leaf2server ports are converted into regexps(1)
+    set_fact:
+         leaf_to_server_ports: "{{ leaf_to_server_ports.split(' ')|join('|') }}"
+    when: not leaf_to_server_ports|search('\[') and not leaf_to_server_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - name: Ensure whitespace separated leaf2server ports are converted into regexps(2)
+    set_fact:
+       leaf_to_server_ports: "{{ '(%s)'|format(leaf_to_server_ports) }}"
+    when: not leaf_to_server_ports|search('\[') and not leaf_to_server_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - debug: msg="{{leaf_to_server_ports}}"
+
+  - name: Ensure whitespace separated clag_peer_ports are converted into regexps(1)
+    set_fact:
+         clag_peer_ports: "{{ clag_peer_ports.split(' ')|join('|') }}"
+    when: not clag_peer_ports|search('\[') and not clag_peer_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - name: Ensure whitespace separated clag_peer_ports ports are converted into regexps(2)
+    set_fact:
+       clag_peer_ports: "{{ '(%s)'|format(clag_peer_ports) }}"
+    when: not clag_peer_ports|search('\[') and not clag_peer_ports|search('\]')
+    tags:
+      - validate
+      - compute
+
+  - debug: msg="{{clag_peer_ports}}"
+
+  - name: Total spine ports given spine_to_leaf set
+    set_fact:
+      spine_ports_list: |
+        [{% for iface in ansible_interfaces %}
+            {% if iface|match(spine_to_leaf_ports) %}
+              '{{ iface }}'
+              {% if not loop.last %}
+                ,
+              {%endif%}
+            {%endif%}
+        {%endfor%}]
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ 'spine' in group_names }}"
+    tags:
+      - validate
+      - compute
+
+  - name: Total leaf ports given leaf_to_spine set
+    set_fact:
+      leaf_ports_list: |
+        [{% for iface in ansible_interfaces %}
+            {% if iface|match(leaf_to_spine_ports) %}
+              '{{ iface }}'
+              {% if not loop.last %}
+                ,
+              {%endif%}
+            {%endif%}
+        {%endfor%}]
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ 'leaf' in group_names }}"
+    tags:
+      - validate
+      - compute
+
+  - name: Total server ports given leaf_to_server set
+    set_fact:
+      server_ports_list: |
+        [{% for iface in ansible_interfaces %}
+            {% if iface|match(leaf_to_server_ports) %}
+              '{{ iface }}'
+              {% if not loop.last %}
+                ,
+              {%endif%}
+            {%endif%}
+        {%endfor%}]
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ 'leaf' in group_names }}"
+    tags:
+      - validate
+      - compute
+
+  - name: Validate spine port count with leaves
+    command: echo "FAILED because insufficient ports specified for spine to leaf connection"
+    failed_when: "{{ 'spine' in group_names and (spine_ports_list|length < num_leaves|int) }}"
+    tags: validate
+      
+  - name: Validate leaf port count with spines
+    command: echo "FAILED because insufficient ports specified for leaf to spine connection"
+    failed_when: "{{ 'leaf' in group_names and (leaf_ports_list|length < num_spines|int) }}"
+    tags: validate
+      
+  - name: Validate server ports specification matches number of hosts
+    command: echo "FAILED because insufficient ports specified for leaf to server connection"
+    failed_when: "{{ 'leaf' in group_names and (server_ports_list|length < hosts_per_leaf|int) }}"
+    when: "{{ not dual_attach_hosts }}"
+    tags: validate
+
+  - name: Validate server ports specification matches number of hosts for dual-attach hosts
+    command: echo "FAILED because insufficient ports specified for leaf to server connection"
+    failed_when: "{{ 'leaf' in group_names and ((server_ports_list|length) < (hosts_per_leaf|int)*2) }}"
+    when: "{{ dual_attach_hosts }}"
+    tags: validate
+
+  - name: valid_lo_ip
+    set_fact:
+      valid_lo_ip: "{{ lo_ip_subnet | ipsubnet }}"
+
+  - name: Verify lo_ip_subnet is a valid IPv4 address
+    debug: msg="{{ valid_lo_ip }}"
+    failed_when: valid_lo_ip == "False"
+    tags:
+      - validate
+      - compute
+
+  - name: Get subnet size
+    set_fact:
+      subnet_size: "{{ lo_ip_subnet | ipaddr('net') | ipaddr('size') }}"
+
+  - name: Verify subnet is sufficient to cover all nodes
+    command: echo "FAILED because loopback ip subnet provided is too small"
+    when: ((subnet_size|int) - 2) < (num_spines + num_leaves)
+    register: result
+    failed_when: not result | skipped
+    tags:
+      - validate
+      - compute
+
+  - name: Verify no overlap between leaf to spine ports and leaf to server ports
+    command: echo "FAILED because {{ item }} is in both server facing port and router facing port"
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ ('leaf' in group_names) and (item|match(leaf_to_spine_ports)) and (item|match(leaf_to_server_ports)) }}"
+    register: result
+    failed_when: not result | skipped
+    tags: validate
+
+  - name: Verify no overlap between leaf to spine ports and leaf to server ports
+    command: echo "FAILED because {{ item }} is in both server facing port and router facing port"
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ ('leaf' in group_names) and (item|match(leaf_to_spine_ports)) and (item|match(leaf_to_server_ports)) }}"
+    register: result
+    failed_when: not result | skipped
+    tags: validate
+
+  - name: Verify no overlap between leaf to spine ports and peer-link ports
+    command: echo "FAILED because {{ item }} is in both peer-link port and router facing port"
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ ('leaf' in group_names) and dual_attach_hosts and (item|match(leaf_to_spine_ports)) and (item|match(clag_peer_ports)) }}"
+    register: result
+    failed_when: not result | skipped
+    tags: validate
+
+  - name: Verify no overlap between leaf to server ports and peer-link ports
+    command: echo "FAILED because {{ item }} is in both peer-link port and server facing port"
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ ('leaf' in group_names) and dual_attach_hosts and (item|match(leaf_to_server_ports)) and (item|match(clag_peer_ports)) }}"
+    register: result
+    failed_when: not result | skipped
+    tags: validate
+

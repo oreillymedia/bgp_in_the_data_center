@@ -1,0 +1,63 @@
+# This is meant to be included in other main playbooks
+---
+  - name: Assign IP address to loopback
+    blockinfile:
+      dest: /etc/network/interfaces
+      marker: "#{mark} lo ANSIBLE MANAGED BLOCK"
+      block: |
+
+        auto lo
+        iface lo inet loopback
+           address {{ my_ip }}/32
+
+    when: ansible_lo.ipv4_secondaries is not defined
+    become: true
+    tags:
+      - compute
+      - assignip
+      - ifconfig
+      - always
+
+  - name: Add ISL interfaces to interfaces file for OSPF
+    blockinfile:
+      dest: /etc/network/interfaces
+      marker: "#{mark} {{ item }} ANSIBLE MANAGED BLOCK"
+      block: |
+        
+        auto {{ item }}
+        iface {{ item }} inet static
+          address {{ my_ip }}/32
+
+      validate: ifup -s -a -i %s
+    become: true
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ (protocol == 'ospf')  and 
+              (( 'spine' in group_names and item|match(spine_to_leaf_ports)) or
+               ( 'leaf' in group_names and item|match(leaf_to_spine_ports))) }}"
+    tags:
+      - ifconfig
+
+  - name: Add ISL interfaces to interfaces file for BGP
+    blockinfile:
+      dest: /etc/network/interfaces
+      marker: "#{mark} {{ item }} ANSIBLE MANAGED BLOCK"
+      block: |
+        
+        auto {{ item }}
+        iface {{ item }}
+
+      validate: ifup -s -a -i %s
+    become: true
+    with_items: "{{ ansible_interfaces }}"
+    when: "{{ (protocol == 'bgp')  and 
+              (( 'spine' in group_names and item|match(spine_to_leaf_ports + '$' )) or
+               ( 'leaf' in group_names and item|match(leaf_to_spine_ports + '$' ))) }}"
+    tags:
+      - ifconfig
+
+  - name: Enable all interfaces
+    command: ifreload -a
+    become: true
+    tags:
+      - ifconfig
+      - command

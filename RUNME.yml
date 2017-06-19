@@ -1,0 +1,101 @@
+---
+- hosts: localhost
+  tasks:
+  - name: Create a dir for storing rendered configs locally
+    file: path=localconfig state=directory owner=cumulus
+
+- hosts: 'leaf*'
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files:
+    - properties.yml
+  tasks:
+
+  - name: Get my node ID
+    set_fact:
+      my_node_id: "{{ inventory_hostname.split('f')[1]|int }}"
+    tags:
+      - compute
+      - always
+ 
+  - group_by: key='leaf'
+    when: "{{ 'leaf' in inventory_hostname }}"
+
+- hosts: 'spine*'
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files:
+    - properties.yml
+  tasks:
+
+  - name: Get my node ID
+    set_fact:
+      my_node_id: "{{ inventory_hostname.split('e')[1]|int }}"
+    tags:
+      - compute
+      - always
+
+  - group_by: key='spine'
+    when: "{{ 'spine' in inventory_hostname }}"
+
+- hosts: '!server*'
+  vars_files:
+    - properties.yml
+  any_errors_fatal: true
+  tasks:
+
+  - group_by: key='routers'
+    when: "{{ 'spine' in inventory_hostname or 'leaf' in inventory_hostname }}"
+    
+  - include: validate-properties.yml
+
+  - include: ntp.yml
+
+  - include: assignip.yml
+
+   #Assume my_ip is set(new or taken from existing iface) when assignip returns
+
+  - include: upinterfaces.yml
+
+  - name: Re-get system facts now that interfaces have been configured
+    action: setup
+    
+  - include: "{{ protocol }}set.yml"
+    when: "{{ ansible_lo.ipv4_secondaries is defined }}"
+
+- hosts: 'server*'
+  vars_files:
+    - properties.yml
+  tasks:
+    - include: hostset.yml
+
+  handlers:
+    - name: Reboot to bring up bonds
+      command: /usr/bin/systemd-run --on-active=10 /bin/systemctl reboot
+      async: 0
+      poll: 0
+      tags:
+        - command
+        - hosts
+        - ifconfig
+  
+    - name: Reload link config
+      command: ifup -a
+      tags:
+        - command
+        - hosts
+        - ifconfig
+
+    - name: Start quagga
+      service: name=quagga state=restarted
+      tags:
+        - routing
+        - command
+
+    - name: Start quagga daemons
+      service: name=quagga state=restarted
+      become: yes
+      when: result|changed
+      tags:
+        - routing
+        - command

@@ -1,0 +1,117 @@
+# This is meant for inclusion in other playbooks
+---
+    - name: Get my node ID
+      set_fact:
+        my_node_id: "{{ inventory_hostname.split('server')[1]|int }}"
+      tags:
+        - compute
+        - always
+
+    - name: create a list of node number
+      set_fact:
+        mystr: "{{ my_node_id|list }}"
+      tags:
+        - compute
+        - always
+
+    - name: Identify subnet from which hosts are assigned IPs for dual-attach
+      set_fact:
+        host_ip_base: |
+          {% if (mystr[0]|int %2) == 1 %}
+             {{ server_ip_base + mystr[0] + '.' + default_vlan|string }}
+          {%else%}
+             {{ server_ip_base + (mystr[0]|int -1)|string + '.' + default_vlan|string }}
+          {%endif%}
+      when: "{{ dual_attach_hosts and not use_vxlan }}"
+
+    - name: Identify subnet from which hosts are assigned IPs for single-attach
+      set_fact:
+        host_ip_base: |
+          {{ server_ip_base + mystr[0] + '.' + default_vlan|string }}
+      when: "{{ not dual_attach_hosts and not use_vxlan }}"
+
+    - name: Identify subnet from which hosts are assigned IPs for VxLAN
+      set_fact:
+        host_ip_base: |
+          {{ server_ip_base + '253.' + default_vlan|string }}
+      when: "{{ use_vxlan }}"
+
+    - name: construct my IP
+      set_fact:
+        host_ip_addr: |
+          {{ "%s.%s/24"|format(host_ip_base.split()[0], my_node_id) }}
+      tags:
+        - compute
+        - always
+
+    - name: Construct GW IP for dual attach
+      set_fact:
+        my_gw_ip: |
+          {{ "%s.254"|format(host_ip_base.split()[0]) }}
+      when: "{{ dual_attach_hosts }}"
+
+    - name: Construct GW IP for single-attach hosts
+      set_fact:
+        my_gw_ip: |
+          {{ "%s.1"|format(host_ip_base.split()[0]) }}
+      when: "{{ not dual_attach_hosts }}"
+
+# we're adding all packages now since we flip the default route to inband
+# once the bond is up
+    - name: Add bonding module
+      command: modprobe -a bonding
+      when: "{{ dual_attach_hosts }}"
+
+    - name: Configure interface up on singly-attached hosts in VxLAN
+      blockinfile:
+        dest: /etc/network/interfaces
+        block: |
+          auto {{ item }}
+          iface {{ item }} inet static
+               address {{ host_ip_addr|trim }}
+               #post-up ip route replace default via {{ my_gw_ip | trim }} dev eth1
+
+      when: "{{ (not dual_attach_hosts) and
+                (item != ansible_default_ipv4.interface) and
+                (item|match('enp0') or item|match('eth')) }}"
+      become: true
+      with_items: "{{ ansible_interfaces }}"
+      notify: Reload link config
+
+    - name: Configure bonds on each host
+      blockinfile:
+        dest: /etc/network/interfaces
+        marker: "# bond config"
+        block: |
+          auto eth1 
+          iface eth1 inet manual
+             bond-master bond0
+          #
+          auto eth2
+          iface eth2 inet manual
+             bond-master bond0
+          #
+          auto bond0
+          iface bond0 inet static
+             bond-slaves eth1 eth2
+             bond-mode 802.3ad
+             bond-miimon 100
+             bond-use-carrier 1
+             bond-lacp-rate 1
+             bond-min-links 1
+             bond-xmit-hash-policy layer3+4
+             address {{ host_ip_addr|trim }}
+             post-up ifenslave bond0 eth1 eth2
+             post-up ip link set bond0 promisc on
+             post-up ip route replace default via {{ my_gw_ip | trim }} dev bond0
+      
+      become: true
+      when: "{{ dual_attach_hosts }}"
+      tags:
+        - hosts
+        - ifconfig
+      notify: Reboot to bring up bonds
+
+
+    - name: Save a local copy of the interfaces for reference
+      fetch: src=/etc/network/interfaces dest=localconfig
