@@ -4,6 +4,8 @@ leaf03
 leaf04
 spine01
 spine02
+exit01
+exit02
 
 [server]
 server01

@@ -21,9 +21,20 @@
   - group_by: key='leaf'
     when: "{{ 'leaf' in inventory_hostname }}"
 
+  - name: Get loopback IP for leaves
+    set_fact:
+       my_ip: "{{ lo_ip_subnet|ipsubnet(32, (my_node_id|int))|ipaddr('address') }}"
+
+  - name: Get my ASN for leaves
+    set_fact:
+      my_asn: "{{ bgp_leaf_asn_base|int + my_node_id|int }}"
+    tags:
+      - compute
+      - routing
+
+
 - hosts: 'spine*'
   any_errors_fatal: true
-  gather_facts: false
   vars_files:
     - properties.yml
   tasks:
@@ -38,30 +49,68 @@
   - group_by: key='spine'
     when: "{{ 'spine' in inventory_hostname }}"
 
+  - name: Get loopback IP for spines
+    set_fact:
+       my_ip: "{{ lo_ip_subnet|ipsubnet(32, -(my_node_id|int)-1)|ipaddr('address') }}"
+
+  - name: Get my ASN for spines
+    set_fact:
+      my_asn: "{{ bgp_spine_asn }}"
+    tags:
+      - compute
+      - routing
+
+- hosts: 'exit*'
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files:
+    - properties.yml
+  tasks:
+
+  - name: Get my node ID
+    set_fact:
+      my_node_id: "{{ (64 + (inventory_hostname.split('t')[1]|int))|int }}"
+    tags:
+      - compute
+      - always
+ 
+  - group_by: key='leaf'
+    when: "{{ 'exit' in inventory_hostname }}"
+
+  - group_by: key='exit'
+    when: "{{ 'exit' in inventory_hostname }}"
+
+  - name: Get loopback IP for leaves
+    set_fact:
+       my_ip: "{{ lo_ip_subnet|ipsubnet(32, (my_node_id|int))|ipaddr('address') }}"
+
+  - name: Get my ASN for exit leaves
+    set_fact:
+      my_asn: "{{ bgp_exit_asn }}"
+    tags:
+      - compute
+      - routing
+
+
 - hosts: '!server*'
   vars_files:
     - properties.yml
   any_errors_fatal: true
+  gather_facts: true
   tasks:
 
   - group_by: key='routers'
     when: "{{ 'spine' in inventory_hostname or 'leaf' in inventory_hostname }}"
     
-  - include: validate-properties.yml
-
   - include: ntp.yml
 
-  - include: assignip.yml
+  - include: compute-leaf-vars-common.yml
+    when: "{{ 'leaf' in group_names }}"
 
-   #Assume my_ip is set(new or taken from existing iface) when assignip returns
+  - include: compute-leaf-vars-l3.yml
+    when: "{{ 'leaf' in group_names }}"
 
-  - include: upinterfaces.yml
-
-  - name: Re-get system facts now that interfaces have been configured
-    action: setup
-    
-  - include: "{{ protocol }}set.yml"
-    when: "{{ ansible_lo.ipv4_secondaries is defined }}"
+  - include: conf-net.yml
 
 - hosts: 'server*'
   vars_files:
@@ -70,7 +119,7 @@
     - include: hostset.yml
 
   handlers:
-    - name: Reboot to bring up bonds
+    - name: Reboot server to bring up bonds
       command: /usr/bin/systemd-run --on-active=10 /bin/systemctl reboot
       async: 0
       poll: 0
@@ -78,24 +127,6 @@
         - command
         - hosts
         - ifconfig
-  
-    - name: Reload link config
-      command: ifup -a
-      tags:
-        - command
-        - hosts
-        - ifconfig
 
-    - name: Start quagga
-      service: name=quagga state=restarted
-      tags:
-        - routing
-        - command
-
-    - name: Start quagga daemons
-      service: name=quagga state=restarted
-      become: yes
-      when: result|changed
-      tags:
-        - routing
-        - command
+    - name: Wait for ssh to come back up
+      local_action: wait_for host={{ inventory_hostname }} state=started delay=3 timeout=7

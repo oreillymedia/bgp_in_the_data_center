@@ -1,0 +1,140 @@
+# This is meant to be included in other main playbooks
+---
+  - name: Construct CLAG SysMAC
+    set_fact:
+      my_clag_sys_mac: |
+        {% if (my_node_id|int % 2) == 1 %}
+          {{ "%s%02d"|format(clag_base_sys_mac, (my_node_id|int)) }}
+        {%else%}
+          {{ "%s%02d" | format(clag_base_sys_mac, (my_node_id|int - 1)) }}
+        {%endif%}
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - leaf
+
+  - name: Construct CLAG Priority
+    set_fact:
+      my_clag_prio: |
+        {% if (my_node_id|int % 2) == 1 %}
+           primary
+        {%else%}
+           secondary
+        {%endif%}
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - leaf
+
+  # Backup IP is the peer switch's eth0 address.
+  # Construct peer switch's name based on my name:
+  # If I'm leaf01, peer is leaf02; if I'm leaf02, peer is leaf01
+  # Same applies for spine and exit leaves
+  - name: Construct CLAG Backup IP for leaves
+    set_fact:
+        clag_backup_ip: |
+          {% if (my_node_id|int % 2) == 1 %}
+             {{ hostvars[inventory_hostname.split('f')[0] + 'f' + "%02d"|format(inventory_hostname.split('f')[1]|int + 1)]['ansible_eth0']['ipv4']['address'] }}
+          {% else %}
+             {{ hostvars[inventory_hostname.split('f')[0] + 'f' + "%02d"|format(inventory_hostname.split('f')[1]|int - 1)]['ansible_eth0']['ipv4']['address'] }}
+          {% endif %}
+    when: "{{ 'leaf' in group_names and 'exit' not in group_names }}"
+
+  - name: Construct CLAG Backup IP for exit leaves
+    set_fact:
+        clag_backup_ip: |
+          {% if (my_node_id|int % 2) == 1 %}
+             {{ hostvars[inventory_hostname.split('t')[0] + 't' + "%02d"|format(inventory_hostname.split('t')[1]|int + 1)]['ansible_eth0']['ipv4']['address'] }}
+          {% else %}
+             {{ hostvars[inventory_hostname.split('t')[0] + 't' + "%02d"|format(inventory_hostname.split('t')[1]|int - 1)]['ansible_eth0']['ipv4']['address'] }}
+          {% endif %}
+    when: "{{ 'leaf' in group_names and 'exit' in group_names }}"
+
+  - name: Identify subnet from which hosts are assigned IPs
+    set_fact:
+      host_ip_base: |
+        {% if (my_node_id|int %2) == 1 %}
+          {{ server_ip_base + my_node_id|string + '.' + default_vlan|string }}
+        {%else%}
+          {{ server_ip_base + (my_node_id|int -1)|string + '.' + default_vlan|string }}
+        {%endif%}
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+
+  - name: Identify subnet from which hosts are assigned IPs
+    set_fact:
+      host_ip_base: |
+        {{ server_ip_base + my_node_id|string + '.' + default_vlan|string }}
+    when: "{{ 'leaf' in group_names and not dual_attach_hosts }}"
+
+
+  - name: Extract low order subnet bits for bridge for dual-attach hosts
+    set_fact:
+      my_br_ip: |
+        {% if (my_node_id|int %2) == 1 %}
+          {{ host_ip_base.split()[0] + '.253/24' }}
+        {%else%}
+          {{ host_ip_base.split()[0] + '.252/24' }}
+        {%endif%}
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Extract low order subnet bits for bridge for single attach hosts
+    set_fact:
+      my_br_ip: |
+          {{ host_ip_base.split()[0] + '.253/24' }}
+    when: "{{ 'leaf' in group_names and not dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Compute VRR address
+    set_fact:
+      my_br_vrr_ip: |
+        {{ host_ip_base.split()[0] + '.254/32' }}
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Compute start of server ports
+    set_fact:
+       server_port_start: "{{ ((leaf_to_server_ports.split('p'))[1].split('-'))[0]|int }}"
+    when: "{{ 'leaf' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Compute end of server ports
+    set_fact:
+       server_port_end: "{{ (((leaf_to_server_ports.split('p'))[1].split('-'))[-1]|int)+1 }}"
+    when: "{{ 'leaf' in group_names and 'exit' not in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Compute start of exit edge ports
+    set_fact:
+       server_port_start: "{{ ((exit_to_edge_ports.split('p'))[1].split('-'))[0]|int }}"
+    when: "{{ 'exit' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - name: Compute end of exit edge ports
+    set_fact:
+       server_port_end: "{{ (((exit_to_edge_ports.split('p'))[1].split('-'))[-1]|int)+1 }}"
+    when: "{{ 'exit' in group_names and dual_attach_hosts }}"
+    tags:
+      - compute
+      - ifconfig
+      - always
+
+  - debug: msg="{{ server_port_start, server_port_end }}"

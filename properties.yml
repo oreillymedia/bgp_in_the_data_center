@@ -9,21 +9,22 @@ hosts_per_leaf: 1
 # For example, with 4 leaves, spine_to_leaf_ports could be
 # "swp[1-4]". The first server port is after the last ISL port
 # For dual-attach ports, the number of leaves have to be even
-spine_to_leaf_ports: "swp[1-4]"
+spine_to_leaf_ports: "swp1-4"
+spine_to_exit_ports: "swp29-30"
 
 # Keep the hosts_per_leaf and leaf_to_server_ports consistent
 # For example, if you had 2 hosts per leaf, leaf_to_server_ports
 # would be "swp[3-4]". The first server port is after the last ISL
 # port
-leaf_to_spine_ports: "swp51 swp52"
-leaf_to_server_ports: "swp[1-2]"
+leaf_to_spine_ports: "swp51-52"
+leaf_to_server_ports: "swp1-2"
+exit_to_edge_ports: "swp1"
 
 ################### Routing Protocol Used ###########################
-# Only BGP supported here
 protocol: 'bgp'
 
 ################### SVI and Host IP CONFIGURATION ###################
-lo_ip_subnet: '10.254.0.0/24'
+lo_ip_subnet: '10.254.0.0/27'
 # The host_ip_base assumes that the lower 3 bytes are free for
 # use with server IP address assignment. The second byte represents the rack
 # (or leaf) number, the third byte to represent the VLAN used with the server
@@ -37,10 +38,14 @@ lo_ip_subnet: '10.254.0.0/24'
 server_ip_base: '10.'
 default_vlan: 20
 
+###################### EVPN Configuration ###########################
+vlans: 100-105
+anycast_vtep_subnet: '10.254.0.32/27'
+
 ################### Dual-Attach Server CONFIGURATION ################
 # Update the clag-peer ports based on how many server ports are there
 dual_attach_hosts: true
-clag_peer_ports: "swp49 swp50"
+clag_peer_ports: "swp49-50"
 
 ###################### NTP Servers #########################
 ntp_servers:
@@ -56,8 +61,9 @@ use_lnv:   false
 ##################################################################
 # BGP specific configuration. Following draft-lapukhov ebgp model
 # here. Spines have a single ASN, each ToR has its own ASN
-bgp_spine_asn: 65000
+bgp_spine_asn: 65500
 bgp_leaf_asn_base: 64512
+bgp_exit_asn: 65000
 clag_base_sys_mac: "44:38:39:ff:00:"
 
 # Troubleshooting server configuration

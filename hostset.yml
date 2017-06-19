@@ -103,14 +103,14 @@
              address {{ host_ip_addr|trim }}
              post-up ifenslave bond0 eth1 eth2
              post-up ip link set bond0 promisc on
-             post-up ip route replace default via {{ my_gw_ip | trim }} dev bond0
+             #post-up ip route replace default via {{ my_gw_ip | trim }} dev bond0
       
       become: true
       when: "{{ dual_attach_hosts }}"
       tags:
         - hosts
         - ifconfig
-      notify: Reboot to bring up bonds
+      notify: Reboot server to bring up bonds
 
 
     - name: Save a local copy of the interfaces for reference

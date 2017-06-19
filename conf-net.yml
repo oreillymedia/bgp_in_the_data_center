@@ -1,0 +1,73 @@
+
+# This task configures /etc/network/interfaces on ifupdown2. The variables for
+# which interfaces are neighbors and networks come from the group_vars/all file.
+- name: configure mgmt VRF
+  shell: sleep 2 && net add vrf mgmt && net commit
+  ignore_errors: true
+  async: 1
+  poll: 0
+  notify: Wait for ssh to come back up
+
+- name: configure rest of networking
+  nclu:
+      atomic: true
+      description: "configure all the newtorking"
+      template: |
+
+            add loopback lo ip address {{ my_ip }}/32
+            {% if 'leaf' in hostvars[ansible_hostname]['group_names'] %}
+               add int {{ leaf_to_spine_ports }}
+               {% if 'exit' not in hostvars[ansible_hostname]['group_names'] %}
+                  add int {{ leaf_to_server_ports }}
+               {% endif %}
+
+               {% if dual_attach_hosts %}
+                  add int {{ clag_peer_ports }}
+
+                  add clag peer sys-mac {{ my_clag_sys_mac|trim }} interface {{ clag_peer_ports }} {{ my_clag_prio|trim }} backup-ip {{ clag_backup_ip|trim }} vrf mgmt
+
+                  {% if 'exit' not in hostvars[ansible_hostname]['group_names'] %}
+                      {% for i in range(server_port_start|int, server_port_end|int) %}
+                          add clag port bond bond-swp{{ i }} interface swp{{ i }} clag-id {{ i }}
+                          add bond bond-swp{{ i }} bridge access {{ default_vlan }}
+                      {% endfor %}
+
+                      add vlan {{ default_vlan }} ip addr {{ my_br_ip|trim }}
+                      add vlan {{ default_vlan }} ip address-virtual 00:00:5e:00:01:01 {{ my_br_vrr_ip|trim }}
+                  {% endif %}
+               {% else %}
+                  add vlan {{ default_vlan }} ip addr {{ my_br_ip|trim }}
+               {% endif %}
+            {% elif 'spine' in hostvars[ansible_hostname]['group_names'] %}
+               add int {{ spine_to_leaf_ports }}
+            {% endif %}
+
+            add bgp autonomous-system {{ my_asn }}
+            add bgp router-id {{ my_ip|trim }}
+            add bgp network {{ my_ip|trim }}/32
+            {% if 'leaf' in hostvars[ansible_hostname]['group_names'] %}
+               add bgp network {{ my_br_ip|trim }}
+            {% endif %}
+
+            add bgp bestpath as-path multipath-relax
+            add bgp bestpath compare-routerid
+            add bgp neighbor fabric peer-group
+            add bgp neighbor fabric description Internal Fabric Network
+            add bgp neighbor fabric remote-as external
+            add bgp ipv6 unicast neighbor fabric activate
+            {% if 'leaf' in hostvars[ansible_hostname]['group_names'] %}
+               add bgp neighbor {{ leaf_to_spine_ports }} peer-group fabric
+            {% elif 'spine' in hostvars[ansible_hostname]['group_names'] %}
+               add bgp neighbor {{ spine_to_leaf_ports }} peer-group fabric
+               add bgp neighbor {{ spine_to_exit_ports }} peer-group fabric
+            {% endif %}
+
+- name: Save a local copy of the interfaces for reference
+  fetch: src=/etc/network/interfaces dest=localconfig
+
+- name: Save a local copy of the quagga config for reference
+  fetch: src=/etc/quagga/Quagga.conf dest=localconfig
+
+- name: Save a local copy of the NTP config for reference
+  fetch: src=/etc/ntp.conf dest=localconfig
+
